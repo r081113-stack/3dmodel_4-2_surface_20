@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>曲面 z = (y - x²)(y - 2x²)</title>
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+  </script>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
+    #plot { width: 90vw; height: 85vh; }
+    #note { max-width: 90vw; margin: 12px 0 0; font-size: 0.95em; color: #333; text-align: center; }
+  </style>
+</head>
+<body>
+
+<div id="plot"></div>
+
+<script>
+  const size = 140;
+  const x = [], y = [], z = [];
+  const xRange = 1.3;
+  const yMin = -0.3, yMax = 1.8;
+
+  for (let i = 0; i < size; i++) {
+    x[i] = -xRange + (2 * xRange * i) / (size - 1);
+    y[i] = yMin + ((yMax - yMin) * i) / (size - 1);
+  }
+
+  let zDataMin = Infinity, zDataMax = -Infinity;
+  for (let i = 0; i < size; i++) {
+    z[i] = [];
+    for (let j = 0; j < size; j++) {
+      const xi = x[j];
+      const yj = y[i];
+      const zij = (yj - Math.pow(xi, 2)) * (yj - 2 * Math.pow(xi, 2));
+      z[i][j] = zij;
+      if (zij < zDataMin) zDataMin = zij;
+      if (zij > zDataMax) zDataMax = zij;
+    }
+  }
+
+  // ズームしても鞍点(原点)が視界から外れないようにするための設定
+  // 1) 各軸のレンジを自動計算に任せず明示的に固定する
+  // 2) camera.center を「原点(0,0,0)がそのレンジの中でどの位置にあるか」に
+  //    合わせて計算する（Plotlyは各軸レンジを内部的に -1〜1 に正規化して
+  //    camera.center/eye の座標系として扱うため）
+  const zRangeMin = zDataMin;   // 谷（負の値）はそのまま見せる
+  const zRangeMax = 3;          // ここを小さくするほど尾根の上部が切れて鞍点付近が大きく見える
+
+  function toNormalized(v, lo, hi) {
+    return -1 + 2 * (v - lo) / (hi - lo);
+  }
+  const cameraCenter = {
+    x: toNormalized(0, -xRange, xRange),
+    y: toNormalized(0, yMin, yMax),
+    z: toNormalized(0, zRangeMin, zRangeMax)
+  };
+
+  // centerが箱の中心からずれた分だけ、初期表示が「寄りすぎ」にならないよう
+  // eye（カメラ距離）をcenterから見た最遠の角に合わせて自動的に広げる
+  function computeEye(center, direction, margin) {
+    let maxCornerDist = 0;
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+      const dx = sx - center.x, dy = sy - center.y, dz = sz - center.z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > maxCornerDist) maxCornerDist = d;
+    }
+    const dirLen = Math.sqrt(direction.x ** 2 + direction.y ** 2 + direction.z ** 2);
+    const dist = maxCornerDist * margin;
+    return {
+      x: direction.x / dirLen * dist,
+      y: direction.y / dirLen * dist,
+      z: direction.z / dirLen * dist
+    };
+  }
+  // margin: 1.0だと箱の角がちょうど画面端に来る計算値。少し余裕を持たせる
+  const cameraEye = computeEye(cameraCenter, { x: -1.3, y: 1.3, z: 1.0 }, 1.15);
+
+  // 1. 曲面本体
+  const surfaceData = {
+    z: z, x: x, y: y,
+    type: 'surface',
+    opacity: 0.8,
+    colorscale: 'Viridis',
+    contours: {
+      x: { show: true, color: 'rgba(0,0,0,0.5)', width: 1, start: -1.3, end: 1.3, size: 0.1 },
+      y: { show: true, color: 'rgba(0,0,0,0.5)', width: 1, start: -0.3, end: 1.8, size: 0.1 }
+    }
+  };
+
+  // 2. 曲線 y = x^2 (z = 0 となる線・赤)
+  const c1X = [], c1Y = [], c1Z = [];
+  for (let t = -1.25; t <= 1.25; t += 0.03) {
+    c1X.push(t);
+    c1Y.push(t * t);
+    c1Z.push(0.04);
+  }
+  const curveYeqX2 = {
+    x: c1X, y: c1Y, z: c1Z,
+    type: 'scatter3d', mode: 'lines',
+    name: '$y = x^2$',
+    line: { color: 'red', width: 6 }
+  };
+
+  // 3. 曲線 y = 2x^2 (z = 0 となる線・青)
+  const c2X = [], c2Y = [], c2Z = [];
+  for (let t = -0.92; t <= 0.92; t += 0.03) {
+    c2X.push(t);
+    c2Y.push(2 * t * t);
+    c2Z.push(0.04);
+  }
+  const curveYeq2X2 = {
+    x: c2X, y: c2Y, z: c2Z,
+    type: 'scatter3d', mode: 'lines',
+    name: '$y = 2x^2$',
+    line: { color: 'dodgerblue', width: 6 }
+  };
+
+  // 4. 原点 (0,0,0) マーカー
+  const originPointData = {
+    x: [0], y: [0], z: [0.08],
+    mode: 'markers', type: 'scatter3d',
+    name: '原点（鞍点）',
+    marker: { size: 2, color: '#39FF14', symbol: 'circle' }
+  };
+
+  const layout = {
+    title: { text: '$\\text{曲面 } z = (y - x^2)(y - 2x^2)$' },
+    autosize: true,
+    showlegend: true,
+    legend: { x: 0, y: 1 },
+    scene: {
+      xaxis: { title: { text: 'x' }, range: [-xRange, xRange] },
+      yaxis: { title: { text: 'y' }, range: [yMin, yMax] },
+      zaxis: { title: { text: 'z' }, range: [zRangeMin, zRangeMax] },
+      aspectmode: 'cube',
+      camera: {
+        center: cameraCenter,
+        eye: cameraEye
+      }
+    }
+  };
+
+  Plotly.newPlot('plot', [surfaceData, curveYeqX2, curveYeq2X2, originPointData], layout);
+</script>
+
+</body>
+</html>
